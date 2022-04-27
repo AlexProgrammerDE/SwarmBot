@@ -85,10 +85,11 @@ async fn run() -> ResContext {
         load,
         ws_port,
         proxy,
+        offline_mode,
     } = Opts::get();
 
     // A list of users we will login
-    let mut bot_receiver = BotData::load(proxy, &users_file, &proxies_file, count)?;
+    let mut bot_receiver = BotData::load(proxy, &users_file, &proxies_file, count, offline_mode)?;
 
     if load {
         while bot_receiver.recv().await.is_some() {

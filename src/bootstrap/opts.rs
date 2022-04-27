@@ -45,6 +45,9 @@ pub struct Opts {
 
     #[clap(short, long, default_value = "340")]
     pub version: usize,
+
+    #[clap(short)]
+    pub offline_mode: bool,
 }
 
 impl Opts {

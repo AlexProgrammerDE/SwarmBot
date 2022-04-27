@@ -49,7 +49,7 @@ impl From<&Address> for String {
 pub struct Connection {
     pub user: ValidUser,
     pub address: Address,
-    pub mojang: MojangApi,
+    pub mojang: Option<MojangApi>,
     pub read: OwnedReadHalf,
     pub write: OwnedWriteHalf,
 }
@@ -58,7 +58,7 @@ impl Connection {
     /// Generates connections given BotData and an address
     pub fn stream(
         server_address: Address,
-        mut users: tokio::sync::mpsc::Receiver<BotData>,
+        mut users: Receiver<BotData>,
     ) -> Receiver<Connection> {
         let (tx, rx) = tokio::sync::mpsc::channel(1);
         tokio::task::spawn_local(async move {

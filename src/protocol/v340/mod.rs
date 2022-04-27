@@ -12,35 +12,36 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-use interfaces::types::{BlockLocation, BlockState, ChunkLocation};
 use std::{cell::RefCell, rc::Rc, sync::mpsc::TryRecvError};
 
+use interfaces::types::{BlockLocation, BlockState, ChunkLocation};
 use swarm_bot_packets::{
-    types::{Packet, PacketState, VarInt, UUID},
+    types::{Packet, PacketState, UUID, VarInt},
     write::ByteWritable,
 };
 
 use crate::{
-    bootstrap::{mojang::calc_hash, storage::ValidUser, Address, Connection},
+    bootstrap::{Address, Connection, mojang::calc_hash, storage::ValidUser},
     client::processor::InterfaceIn,
     error::{err, Error::WrongPacket, Res},
     protocol::{
+        ClientInfo,
         encrypt::{rand_bits, Rsa},
-        io::{
+        EventQueue,
+        Face, InterfaceOut, InvAction, io::{
             reader::PacketReader,
             writer::{PacketWriteChannel, PacketWriter},
-        },
-        v340::{
+        }, Login, Mine, Minecraft, v340::{
             clientbound::{JoinGame, LoginSuccess},
             serverbound::{
                 ClientStatusAction, DigStatus, Hand, HandshakeNextState, InteractEntityKind,
             },
         },
-        ClientInfo, EventQueue, Face, InterfaceOut, InvAction, Login, Mine, Minecraft,
     },
     storage::entities::EntityKind,
     types::{Dimension, Direction, Location, PacketData, Slot},
 };
+use crate::error::Error::OfflineMode;
 
 mod clientbound;
 mod serverbound;
@@ -453,58 +454,66 @@ impl Minecraft for Protocol {
             })
             .await?;
 
-        let clientbound::EncryptionRequest {
-            public_key_der,
-            verify_token,
-            server_id,
-        } = reader.read_exact_packet().await?;
+        loop {
+            let mut data = reader.read().await?;
 
-        let rsa = Rsa::from_der(&public_key_der);
+            // set encryption, set compression or login success
+            match data.id {
+                clientbound::EncryptionRequest::ID => {
+                    if !user.online_mode {
+                        return Err(OfflineMode);
+                    }
 
-        let shared_secret = rand_bits();
+                    let clientbound::EncryptionRequest {
+                        public_key_der,
+                        verify_token,
+                        server_id,
+                    } = data.read();
 
-        let encrypted_ss = rsa.encrypt(&shared_secret).unwrap();
-        let encrypted_verify = rsa.encrypt(&verify_token).unwrap();
+                    let rsa = Rsa::from_der(&public_key_der);
 
-        // Mojang online mode requests
-        let hash = calc_hash(&server_id, &shared_secret, &public_key_der);
-        mojang.join(uuid, &hash, &access_id).await?;
+                    let shared_secret = rand_bits();
 
-        // id = 1
-        writer
-            .write(serverbound::EncryptionResponse {
-                shared_secret: encrypted_ss,
-                verify_token: encrypted_verify,
-            })
-            .await?;
+                    let encrypted_ss = rsa.encrypt(&shared_secret).unwrap();
+                    let encrypted_verify = rsa.encrypt(&verify_token).unwrap();
 
-        // writer.flush().await;
+                    // Mojang online mode requests
+                    let hash = calc_hash(&server_id, &shared_secret, &public_key_der);
+                    mojang.as_ref().unwrap().join(uuid, &hash, &access_id).await?;
 
-        // we now do everything encrypted
-        writer.encryption(&shared_secret);
-        reader.encryption(&shared_secret);
+                    // id = 1
+                    writer
+                        .write(serverbound::EncryptionResponse {
+                            shared_secret: encrypted_ss,
+                            verify_token: encrypted_verify,
+                        })
+                        .await?;
 
-        // set compression or login success
-        let mut data = reader.read().await?;
+                    // writer.flush().await;
 
-        let LoginSuccess { .. } = match data.id {
-            clientbound::SetCompression::ID => {
-                let clientbound::SetCompression { threshold } = data.read();
+                    // we now do everything encrypted
+                    writer.encryption(&shared_secret);
+                    reader.encryption(&shared_secret);
+                }
+                clientbound::SetCompression::ID => {
+                    let clientbound::SetCompression { threshold } = data.read();
 
-                reader.compression(threshold.into());
-                writer.compression(threshold.into());
-
-                reader.read_exact_packet().await?
-            }
-            clientbound::LoginSuccess::ID => data.reader.read(),
-            actual => {
-                return Err(WrongPacket {
-                    state: PacketState::Login,
-                    expected: LoginSuccess::ID,
-                    actual,
-                });
-            }
-        };
+                    reader.compression(threshold.into());
+                    writer.compression(threshold.into());
+                }
+                clientbound::LoginSuccess::ID => {
+                    let LoginSuccess { .. } = data.reader.read();
+                    break;
+                }
+                actual => {
+                    return Err(WrongPacket {
+                        state: PacketState::Login,
+                        expected: LoginSuccess::ID,
+                        actual,
+                    });
+                }
+            };
+        }
 
         let (tx, rx) = std::sync::mpsc::channel();
         let (os_tx, os_rx) = tokio::sync::oneshot::channel();

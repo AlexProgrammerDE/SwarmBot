@@ -52,6 +52,7 @@ pub struct ValidUser {
     pub email: String,
     pub username: String,
     pub password: String,
+    pub online_mode: bool,
     pub last_checked: u64,
     pub uuid: String,
     pub access_id: String,
@@ -79,7 +80,7 @@ pub struct UserCache {
 pub struct BotData {
     pub user: ValidUser,
     pub proxy: Option<Proxy>,
-    pub mojang: MojangApi,
+    pub mojang: Option<MojangApi>,
 }
 
 impl BotData {
@@ -88,6 +89,7 @@ impl BotData {
         users_file: &str,
         proxies_file: &str,
         count: usize,
+        offline_mode: bool,
     ) -> ResContext<Receiver<BotData>> {
         let csv_file = File::open(&users_file)
             .context(|| format!("could not open users file {}", users_file))?;
@@ -110,9 +112,56 @@ impl BotData {
             }
         };
 
-        let cache = UserCache::load("cache.db".into());
+        if offline_mode {
+            Ok(BotData::obtain_users_offline(count, csv_users, proxies))
+        } else {
+            let cache = UserCache::load("cache.db".into());
 
-        Ok(cache.obtain_users(count, csv_users, proxies))
+            Ok(cache.obtain_users(count, csv_users, proxies))
+        }
+    }
+
+    fn obtain_users_offline(
+        count: usize,
+        users: Vec<CSVUser>,
+        proxies: Vec<Option<Proxy>>,
+    ) -> Receiver<BotData> {
+        let mut proxies = proxies.into_iter().cycle();
+
+        let (tx, rx) = tokio::sync::mpsc::channel(32);
+
+        tokio::task::spawn_local(async move {
+            let mut local_count = 0;
+
+            'user_loop: for csv_user in users.into_iter() {
+                let proxy = proxies.next().unwrap();
+
+                local_count += 1;
+                println!("valid user {}", csv_user.email);
+                tx.send(BotData {
+                    user: ValidUser {
+                        email: "".to_string(),
+                        username: csv_user.email,
+                        password: "".to_string(),
+                        online_mode: false,
+                        last_checked: 0,
+                        uuid: "".to_string(),
+                        access_id: "".to_string(),
+                        client_id: "".to_string(),
+                    },
+                    proxy,
+                    mojang: None,
+                })
+                    .await
+                    .unwrap();
+
+                if local_count >= count {
+                    break 'user_loop;
+                }
+            }
+        });
+
+        rx
     }
 }
 
@@ -162,6 +211,7 @@ impl UserCache {
                             email: user.email.clone(),
                             username: res.username,
                             password: user.password.clone(),
+                            online_mode: true,
                             last_checked: time(),
                             uuid: res.uuid.to_string(),
                             access_id: res.access_token,
@@ -277,10 +327,10 @@ impl UserCache {
                     tx.send(BotData {
                         user,
                         proxy,
-                        mojang,
+                        mojang: Some(mojang),
                     })
-                    .await
-                    .unwrap();
+                        .await
+                        .unwrap();
                 } else {
                     println!("invalid user {}", csv_user.email);
                 }

@@ -35,6 +35,7 @@ pub enum Error {
         expected: u32,
         actual: u32,
     },
+    OfflineMode,
     Simple(String),
     Mojang(MojangErr),
 }
@@ -82,6 +83,7 @@ impl Display for Error {
                 "wrong packet. Expected ID {}, got {} in state {}",
                 expected, actual, state
             )),
+            Error::OfflineMode => f.write_str("server is in online mode, but the bot was offline mode"),
             Error::Resolve(r) => std::fmt::Display::fmt(r, f),
             Error::Serde(s) => std::fmt::Display::fmt(s, f),
         }
