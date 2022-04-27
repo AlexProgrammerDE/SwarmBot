@@ -23,7 +23,6 @@ use std::{
 };
 
 use tokio::sync::mpsc::Receiver;
-use swarm_bot_packets::types::UUID;
 
 use crate::{
     bootstrap,

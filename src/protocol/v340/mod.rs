@@ -41,7 +41,7 @@ use crate::{
     storage::entities::EntityKind,
     types::{Dimension, Direction, Location, PacketData, Slot},
 };
-use crate::error::Error::OfflineMode;
+use crate::error::Error::{OfflineMode};
 
 mod clientbound;
 mod serverbound;
@@ -453,8 +453,11 @@ impl Minecraft for Protocol {
             })
             .await?;
 
-        let mut server_uuid = None;
-        let mut server_username = None;
+        // Mistake by rust parser
+        #[allow(unused_assignments)]
+        let mut server_username: Option<String> = None;
+        #[allow(unused_assignments)]
+        let mut server_uuid: Option<UUID> = None;
 
         loop {
             let mut data = reader.read().await?;
