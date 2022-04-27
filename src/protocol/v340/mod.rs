@@ -432,7 +432,6 @@ impl Minecraft for Protocol {
         } = user;
 
         let Address { host, port } = address;
-        let uuid = UUID::from(&uuid);
 
         let mut reader = PacketReader::from(read);
         let mut writer = PacketWriter::from(write);
@@ -453,6 +452,9 @@ impl Minecraft for Protocol {
                 username: username.clone(),
             })
             .await?;
+
+        let mut server_uuid = None;
+        let mut server_username = None;
 
         loop {
             let mut data = reader.read().await?;
@@ -476,6 +478,8 @@ impl Minecraft for Protocol {
 
                     let encrypted_ss = rsa.encrypt(&shared_secret).unwrap();
                     let encrypted_verify = rsa.encrypt(&verify_token).unwrap();
+
+                    let uuid = UUID::from(&uuid);
 
                     // Mojang online mode requests
                     let hash = calc_hash(&server_id, &shared_secret, &public_key_der);
@@ -502,7 +506,9 @@ impl Minecraft for Protocol {
                     writer.compression(threshold.into());
                 }
                 clientbound::LoginSuccess::ID => {
-                    let LoginSuccess { .. } = data.reader.read();
+                    let LoginSuccess { uuid, username } = data.reader.read();
+                    server_uuid = Some(UUID::from(uuid));
+                    server_username = Some(username);
                     break;
                 }
                 actual => {
@@ -561,8 +567,8 @@ impl Minecraft for Protocol {
             queue,
             out,
             info: ClientInfo {
-                username,
-                uuid,
+                username: server_username.unwrap(),
+                uuid: server_uuid.unwrap(),
                 entity_id,
             },
         };
