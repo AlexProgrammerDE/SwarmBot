@@ -453,11 +453,8 @@ impl Minecraft for Protocol {
             })
             .await?;
 
-        // Mistake by rust parser
-        #[allow(unused_assignments)]
-        let mut server_username: Option<String> = None;
-        #[allow(unused_assignments)]
-        let mut server_uuid: Option<UUID> = None;
+        let server_username: String;
+        let server_uuid: UUID;
 
         loop {
             let mut data = reader.read().await?;
@@ -510,8 +507,8 @@ impl Minecraft for Protocol {
                 }
                 clientbound::LoginSuccess::ID => {
                     let LoginSuccess { uuid, username } = data.reader.read();
-                    server_uuid = Some(UUID::from(uuid));
-                    server_username = Some(username);
+                    server_uuid = UUID::from(uuid);
+                    server_username = username;
                     break;
                 }
                 actual => {
@@ -570,8 +567,8 @@ impl Minecraft for Protocol {
             queue,
             out,
             info: ClientInfo {
-                username: server_username.unwrap(),
-                uuid: server_uuid.unwrap(),
+                username: server_username,
+                uuid: server_uuid,
                 entity_id,
             },
         };
